@@ -55,10 +55,10 @@
     <!-- Button Container -->
     <div class="mt-auto">
         <div class="d-grid gap-2">
-            <button id="stop-swap-button" class="btn btn-danger" style="{% if status == 'Completed' or status == 'Error' or status == 'Timed Out' %}display: none;{% endif %}">
+            <button id="stop-swap-button" class="btn btn-danger {% if status == 'Completed' or status == 'Error' or status == 'Timed Out' %}d-none{% endif %}">
                 <i class="bi bi-stop-circle me-2"></i>Stop and Log Out
             </button>
-            <button id="logout-button" class="btn btn-primary" style="{% if status != 'Completed' and status != 'Error' and status != 'Timed Out' %}display: none;{% endif %}">
+            <button id="logout-button" class="btn btn-primary {% if status != 'Completed' and status != 'Error' and status != 'Timed Out' %}d-none{% endif %}">
                 <i class="bi bi-box-arrow-right me-2"></i>Log Out
             </button>
         </div>
