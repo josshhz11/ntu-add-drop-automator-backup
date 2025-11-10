@@ -1,114 +1,44 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ og_data.title }}</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', path='NTU-Add-Drop-Automator.Logo.png') }}">
-    <!-- Open Graph Meta Tags -->
-    <meta property="og:base_title" content="{{ og_data.base_title }}" />
-    <meta property="og:title" content="{{ og_data.title }}" />
-    <meta property="og:description" content="{{ og_data.description }}" />
-    <meta property="og:image" content="https://ntu-add-drop-automator.site/static/thumbnail.jpg" />
-    <meta property="og:url" content="{{ og_data.url }}" />
-    <meta property="og:type" content="website" />
-    
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/styles.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% extends "base.html" %}
 
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y389FX2T71"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
+{% block content %}
 
-        gtag('config', 'G-Y389FX2T71');
-    </script>
-</head>
+    <div class="card-body p-4">
+        <h4 class="card-title mb-4">Input Indexes</h4>
 
-<body class="bg-light d-flex align-items-center justify-content-center">
-    <div class="container py-5 main-container">
-        <div class="row shadow-sm rounded overflow-hidden">
-            <!-- Left Panel -->
-            <div class="col-md-6 bg-white p-4 d-flex flex-column">
-                <div class="d-flex align-items-center mb-4">
-                    <img src="{{ url_for('static', path='Nanyang_Technological_University-Logo.png') }}" alt="NTU Logo" class="me-3" style="height: 40px;">
-                    <h2 class="mb-0">{{ og_data.base_title }}</h2>
-                </div>
-                
-                <div class="card border-0 bg-light mb-4 flex-grow-1">
-                    <div class="card-body">
-                        <p class="text-muted">
-                            This tool helps you to periodically check vacancies for your modules you wish to swap every 5 minutes, up to a maximum of 2 hours. If slots are found, they will be automatically swapped for you. If not, it will keep running till we find a slot, or 2 hours is up. Then you will have to sign in again.
-                            <br><br>
-                            This tool allows for choosing multiple desired slots (if changing due to time slots), and you simply have to write all the indexes separated by commas (i.e. 80271, 80272, 80273).
-                            <br><br>
-                            <strong>If you're running into errors on the page, try closing this tab and trying again.</strong>
-                            <br><br>
-                            This tool is fully secure and no user credentials are stored or accessible.
-                        </p>
+        <form id="indexForm" method="POST" action="/swap-index" class="d-flex flex-column h-100">
+            <!-- Hidden input to pass the number of modules -->                
+            <input type="hidden" name="number_of_modules" value="{{ num_modules }}">
+
+            <div id="modulesContainer" class="flex-grow-1 overflow-auto mb-4">
+                {% for i in range(num_modules) %}
+                <div class="module-input-group p-3 mb-3">
+                    <h5 class="mb-3">Module {{ i + 1 }}</h5>
+                    <div class="mb-3">
+                        <label for="old_index_{{ i }}" class="form-label">Old Index:</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-bookmark"></i></span>
+                            <input type="text" class="form-control" id="old_index_{{ i }}" name="old_index_{{ i }}" 
+                                placeholder="Enter current index" required {% if i == 0 %}autofocus{% endif %}>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new_index_{{ i }}" class="form-label">New Index:</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-arrow-left-right"></i></span>
+                            <input type="text" class="form-control" id="new_index_{{ i }}" name="new_index_{{ i }}" 
+                                placeholder="e.g., 80271, 80272, 80273" required>
+                        </div>
+                        <small class="text-muted">Separate multiple indexes with commas</small>
                     </div>
                 </div>
-
-                <!-- Two buttons side by side -->
-                <div class="d-flex gap-2">
-                    <button class="btn btn-primary flex-grow-1" 
-                            onclick="window.open('https://docs.google.com/forms/d/e/1FAIpQLSdniXT-UR1MLjssAkZLvJunD2lCgfckdjMd7iamOFD-cjCMKg/viewform', '_blank')">
-                        <i class="bi bi-chat-dots me-2"></i>Provide Feedback
-                    </button>
-                    <a href="/privacy-policy" class="btn btn-outline-secondary flex-grow-1">
-                        <i class="bi bi-shield-check me-2"></i>Privacy Policy
-                    </a>
-                </div>
+                {% endfor %}
             </div>
-
-            <!-- Right Panel - keep all this content the same -->
-            <div class="col-md-6 bg-light p-4 d-flex flex-column">
-                <div class="card-body p-4">
-                    <h4 class="card-title mb-4">Input Indexes</h4>
-
-                    <form id="indexForm" method="POST" action="/swap-index" class="d-flex flex-column h-100">
-                        <!-- Hidden input to pass the number of modules -->                
-                        <input type="hidden" name="number_of_modules" value="{{ num_modules }}">
-
-                        <div id="modulesContainer" class="flex-grow-1 overflow-auto mb-4">
-                            {% for i in range(num_modules) %}
-                            <div class="module-input-group p-3 mb-3">
-                                <h5 class="mb-3">Module {{ i + 1 }}</h5>
-                                <div class="mb-3">
-                                    <label for="old_index_{{ i }}" class="form-label">Old Index:</label>
-                                    <div class="input-group">
-                                        <span class="input-group-text"><i class="bi bi-bookmark"></i></span>
-                                        <input type="text" class="form-control" id="old_index_{{ i }}" name="old_index_{{ i }}" 
-                                            placeholder="Enter current index" required {% if i == 0 %}autofocus{% endif %}>
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="new_index_{{ i }}" class="form-label">New Index:</label>
-                                    <div class="input-group">
-                                        <span class="input-group-text"><i class="bi bi-arrow-left-right"></i></span>
-                                        <input type="text" class="form-control" id="new_index_{{ i }}" name="new_index_{{ i }}" 
-                                            placeholder="e.g., 80271, 80272, 80273" required>
-                                    </div>
-                                    <small class="text-muted">Separate multiple indexes with commas</small>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        </div>
-                        <div class="mt-auto">
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-arrow-right-circle me-2"></i>Automate Swap
-                            </button>
-                        </div>
-                    </form>
-                </div>
+            <div class="mt-auto">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-arrow-right-circle me-2"></i>Automate Swap
+                </button>
             </div>
-        </div>
+        </form>
     </div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+{% endblock %}
