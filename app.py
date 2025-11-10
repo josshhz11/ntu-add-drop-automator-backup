@@ -23,18 +23,29 @@ from concurrent.futures import ThreadPoolExecutor
 import subprocess
 from starlette.middleware.sessions import SessionMiddleware
 import secrets
+import platform
+import shutil
 
 def check_chrome_paths():
     try:
-        chrome_path = subprocess.getoutput("which google-chrome")
-        chromedriver_path = subprocess.getoutput("which chromedriver")
-        chrome_version = subprocess.getoutput("google-chrome --version")
-        chromedriver_version = subprocess.getoutput("chromedriver --version")
+        # For production on Linux
+        if platform.system() == "Linux":
+            chrome_path = subprocess.getoutput("which google-chrome")
+            chromedriver_path = subprocess.getoutput("which chromedriver")
+            chrome_version = subprocess.getoutput("google-chrome --version")
+            chromedriver_version = subprocess.getoutput("chromedriver --version")
 
-        print(f"Chrome Path: {chrome_path}")
-        print(f"Chrome Version: {chrome_version}")
-        print(f"ChromeDriver Path: {chromedriver_path}")
-        print(f"ChromeDriver Version: {chromedriver_version}")
+            print(f"Chrome Path: {chrome_path}")
+            print(f"Chrome Version: {chrome_version}")
+            print(f"ChromeDriver Path: {chromedriver_path}")
+            print(f"ChromeDriver Version: {chromedriver_version}")
+        
+        # For testing/development on Windows: Do not print anything
+        # else:
+            # chrome_path = shutil.which("chrome") or "Chrome not found"
+            # chromedriver_path = shutil.which("chromedriver") or "ChromeDriver not found"
+            # print(f"Chrome Path: {chrome_path}")
+            # print(f"ChromeDriver Path: {chromedriver_path}")
 
     except Exception as e:
         print(f"Error checking paths: {str(e)}")
@@ -65,12 +76,12 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 # Setup Jinja2 Templates (Same as Flask's "templates" folder)
 templates = Jinja2Templates(directory="templates")
 
-# Configure ChromeDriver settings
-CHROME_BINARY_PATH = "/usr/bin/google-chrome"
-CHROMEDRIVER_PATH = "/usr/local/bin/chromedriver"
+# Configure ChromeDriver settings (Manual for the Windows path configurations)
+CHROME_BINARY_PATH = "/usr/bin/google-chrome" if platform.system() == "Linux" else "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+CHROMEDRIVER_PATH = "/usr/local/bin/chromedriver" if platform.system() == "Linux" else "C:\\Users\\joshua\\Downloads\\chromedriver-win64\\chromedriver.exe"
 
 chrome_options = Options()
-chrome_options.binary_location = "/usr/bin/google-chrome"
+chrome_options.binary_location = CHROME_BINARY_PATH
 chrome_options.add_argument("--headless")  # Headless mode
 chrome_options.add_argument("--disable-gpu")  # Fixes rendering issues
 chrome_options.add_argument("--no-sandbox")  # Required for running as root
@@ -90,7 +101,7 @@ def create_driver():
     """
     try:
         print("Starting ChromeDriver...")
-        service = Service("/usr/local/bin/chromedriver")  # Ensure correct path
+        service = Service(CHROMEDRIVER_PATH)  # Ensure correct path
         driver = webdriver.Chrome(service=service, options=chrome_options)
         print("ChromeDriver started successfully!")
         return driver
@@ -276,23 +287,24 @@ async def index(request: Request, redis_db=Depends(get_redis)):
     current_month = now.month
 
     # If not January (1) or August (8), render the offline page
-    if current_month not in (1, 8):
+    # if current_month not in (1, 8):
         # Determine the next eligible month and year:
         # If current month is before August, the next eligible month is August of the same year.
         # Otherwise (if current month is after August), the next eligible month is January of the next year.
-        eligible_month = "August" if current_month < 8 else "January"
-        eligible_year = now.year if current_month < 8 else now.year + 1
+        # eligible_month = "August" if current_month < 8 else "January"
+        # eligible_year = now.year if current_month < 8 else now.year + 1
 
-        return templates.TemplateResponse(
-            "offline.html", 
-            {"request": request, "eligible_month": eligible_month, "eligible_year": eligible_year, "og_data": og_data}
-        )
+        # return templates.TemplateResponse(
+        #     "offline.html", 
+        #     {"request": request, "eligible_month": eligible_month, "eligible_year": eligible_year, "og_data": og_data}
+        # )
 
     # Otherwise, if it is indeed in January or August, continue running the site as per normal.
     # Check for logout or timeout messages
-    logout_message = redis_db.get("logout_message")
-    if logout_message:
-        redis_db.delete("logout_message") # Remove it after retrieving
+    # logout_message = redis_db.get("logout_message")
+    logout_message = ""
+    # if logout_message:
+    #     redis_db.delete("logout_message") # Remove it after retrieving
     
     # Render index page with logout message (if any)
     return templates.TemplateResponse(
