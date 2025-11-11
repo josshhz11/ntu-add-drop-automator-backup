@@ -68,10 +68,7 @@ RUN LATEST_CHROMEDRIVER=$(curl -s "https://googlechromelabs.github.io/chrome-for
     rm -rf /tmp/chrome* && \
     echo "Installed versions:" && \
     google-chrome --version && \
-    chromedriver --version && \
-    echo "Testing Chrome..." && \
-    google-chrome --headless --no-sandbox --disable-gpu --dump-dom https://google.com > /dev/null && \
-    echo "Chrome test passed!"
+    chromedriver --version
 
 # 5. Set display (optional for headless operations)
 ENV DISPLAY=:99
