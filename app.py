@@ -59,12 +59,34 @@ load_dotenv()
 # Setup Redis connection
 def get_redis():
     """Dependency Injection: Returns a Redis connection"""
-    return redis.StrictRedis(
-        host=os.environ.get("REDIS_HOST", "red-cug9uopopnds7398r2kg"),
-        port=int(os.environ.get("REDIS_PORT", 6379)),
-        password=os.environ.get("REDIS_PASSWORD", None),
-        decode_responses=True
-    )
+    # For production in Render
+    if os.environ.get("RENDER"):
+        return redis.StrictRedis(
+            host=os.environ.get("REDIS_HOST", "red-cug9uopopnds7398r2kg"),
+            port=int(os.environ.get("REDIS_PORT", 6379)),
+            password=os.environ.get("REDIS_PASSWORD", None),
+            decode_responses=True
+        )
+    # For local testing/development on Windows/WSL Ubuntu
+    else:
+        return redis.StrictRedis(
+            host="localhost",
+            port=6379,
+            decode_responses=True,
+            db=0
+        )
+    # KEY THIS IN TO WSL/UBUNTU TERMINAL TO START REDIS SERVER
+    # sudo apt install redis-server
+    # sudo service redis-server start
+    # sudo service redis-server status (Check if its running)
+    # sudo service redis-server stop
+    
+    # ALTERNATIVELY USE DOCKER ON JUST A NORMAL WINDOWS TERMINAL
+    # docker run -d -p 6379:6379 --name redis-local redis:7-alpine (first time setup - creates and starts container)
+    # docker start redis-local
+    # docker stop redis-local
+    # docker ps (check if container running)
+
 
 # Explicitly fetch the secret key
 app = FastAPI()
@@ -287,24 +309,24 @@ async def index(request: Request, redis_db=Depends(get_redis)):
     current_month = now.month
 
     # If not January (1) or August (8), render the offline page
-    # if current_month not in (1, 8):
+    if current_month not in (1, 8):
         # Determine the next eligible month and year:
         # If current month is before August, the next eligible month is August of the same year.
         # Otherwise (if current month is after August), the next eligible month is January of the next year.
-        # eligible_month = "August" if current_month < 8 else "January"
-        # eligible_year = now.year if current_month < 8 else now.year + 1
+        eligible_month = "August" if current_month < 8 else "January"
+        eligible_year = now.year if current_month < 8 else now.year + 1
 
-        # return templates.TemplateResponse(
-        #     "offline.html", 
-        #     {"request": request, "eligible_month": eligible_month, "eligible_year": eligible_year, "og_data": og_data}
-        # )
+        return templates.TemplateResponse(
+            "offline.html", 
+            {"request": request, "eligible_month": eligible_month, "eligible_year": eligible_year, "og_data": og_data}
+        )
 
     # Otherwise, if it is indeed in January or August, continue running the site as per normal.
     # Check for logout or timeout messages
-    logout_message = ""
-    # logout_message = redis_db.get("logout_message")
-    # if logout_message:
-    #     redis_db.delete("logout_message") # Remove it after retrieving
+    # logout_message = ""
+    logout_message = redis_db.get("logout_message")
+    if logout_message:
+        redis_db.delete("logout_message") # Remove it after retrieving
     
     # Render index page with logout message (if any)
     return templates.TemplateResponse(
