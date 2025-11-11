@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     unzip \
     gnupg \
+    curl \
     fonts-liberation \
     libappindicator3-1 \
     libasound2 \
