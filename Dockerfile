@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-slim
+FROM python:3.9-slim as base
 
 # Install necessary system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 1. Add Google’s signing key using the recommended keyring method
+FROM base as chrome-installer
 RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome.gpg
 
 # 2. Set up the Google Chrome repository using the keyring
@@ -54,12 +55,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 4. Remove any existing ChromeDriver to avoid conflicts
 RUN rm -f /usr/local/bin/chromedriver
 
-# 5. Install ChromeDriver matching the installed Chrome version (142.0.7444.134)
-RUN wget https://storage.googleapis.com/chrome-for-testing-public/142.0.7444.134/linux64/chromedriver-linux64.zip -O /tmp/chromedriver.zip \
-    && unzip /tmp/chromedriver.zip -d /tmp/ \
-    && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
-    && chmod +x /usr/local/bin/chromedriver \
-    && rm -rf /tmp/chromedriver-linux64 /tmp/chromedriver.zip
+# 5. Check Chrome Version and download the same exact ChromeDriver version 
+RUN CHROME_VERSION=$(google-chrome --version | sed 's/Google Chrome //' | sed 's/ .*//' | cut -d. -f1-3) && \
+    echo "Chrome version: $CHROME_VERSION" && \
+    echo "Getting ChromeDriver version: $CHROME_VERSION..." && \
+    wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip" && \
+    unzip /tmp/chromedriver.zip -d /tmp/ && \
+    mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    chmod +x /usr/local/bin/chromedriver && \
+    rm -rf /tmp/chromedriver*
 
 # 6. Verify ChromeDriver version during build
 RUN chromedriver --version
@@ -68,12 +72,14 @@ RUN chromedriver --version
 ENV DISPLAY=:99
 
 # 8. Copy requirements.txt and install Python dependencies
+FROM chrome-installer as final
 COPY requirements.txt /app/
 WORKDIR /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 9. Copy your application code into the container
-COPY . /app
+# Application code (ONLY THIS rebuilds on code changes)
+COPY . .
 
 # 10. Expose port 5000 for FastAPI
 EXPOSE 5000
