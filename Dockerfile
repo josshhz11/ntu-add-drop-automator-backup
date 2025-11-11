@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-slim as base
+FROM python:3.9-slim AS base
 
 # Install necessary system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 1. Add Google’s signing key using the recommended keyring method
-FROM base as chrome-installer
+FROM base AS chrome-installer
 RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome.gpg
 
 # 2. Set up the Google Chrome repository using the keyring
@@ -68,13 +68,16 @@ RUN LATEST_CHROMEDRIVER=$(curl -s "https://googlechromelabs.github.io/chrome-for
     rm -rf /tmp/chrome* && \
     echo "Installed versions:" && \
     google-chrome --version && \
-    chromedriver --version
+    chromedriver --version && \
+    echo "Testing Chrome..." && \
+    google-chrome --headless --no-sandbox --disable-gpu --dump-dom https://google.com > /dev/null && \
+    echo "Chrome test passed!"
 
 # 5. Set display (optional for headless operations)
 ENV DISPLAY=:99
 
 # 6. Copy requirements.txt and install Python dependencies
-FROM chrome-installer as final
+FROM chrome-installer AS final
 COPY requirements.txt /app/
 WORKDIR /app
 RUN pip install --no-cache-dir -r requirements.txt
