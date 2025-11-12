@@ -23,104 +23,61 @@ from concurrent.futures import ThreadPoolExecutor
 import subprocess
 from starlette.middleware.sessions import SessionMiddleware
 import secrets
+from fastapi.middleware.cors import CORSMiddleware
+from typing import Dict, Any
+import uuid
 import platform
-import shutil
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
 
 def check_chrome_paths():
     try:
-        # For production on Linux
-        if platform.system() == "Linux":
-            chrome_path = subprocess.getoutput("which google-chrome")
-            chromedriver_path = subprocess.getoutput("which chromedriver")
-            chrome_version = subprocess.getoutput("google-chrome --version")
-            chromedriver_version = subprocess.getoutput("chromedriver --version")
+        chrome_path = subprocess.getoutput("which google-chrome")
+        chromedriver_path = subprocess.getoutput("which chromedriver")
+        chrome_version = subprocess.getoutput("google-chrome --version")
+        chromedriver_version = subprocess.getoutput("chromedriver --version")
 
-            print(f"Chrome Path: {chrome_path}")
-            print(f"Chrome Version: {chrome_version}")
-            print(f"ChromeDriver Path: {chromedriver_path}")
-            print(f"ChromeDriver Version: {chromedriver_version}")
-        
-        # For testing/development on Windows: Do not print anything
-        # else:
-            # chrome_path = shutil.which("chrome") or "Chrome not found"
-            # chromedriver_path = shutil.which("chromedriver") or "ChromeDriver not found"
-            # print(f"Chrome Path: {chrome_path}")
-            # print(f"ChromeDriver Path: {chromedriver_path}")
+        print(f"Chrome Path: {chrome_path}")
+        print(f"Chrome Version: {chrome_version}")
+        print(f"ChromeDriver Path: {chromedriver_path}")
+        print(f"ChromeDriver Version: {chromedriver_version}")
 
     except Exception as e:
         print(f"Error checking paths: {str(e)}")
 
-# Call this function at the start of your script
-check_chrome_paths()
-
-# Load environment variables manually (if needed)
-load_dotenv()
-
-# Setup Redis connection
-def get_redis():
-    """Dependency Injection: Returns a Redis connection"""
-    # For production in Render
-    if os.environ.get("RENDER"):
+def setup_redis_connection():
+    """Set up and return Redis connection."""
+    def get_redis():
+        """Dependency Injection: Returns a Redis connection"""
         return redis.StrictRedis(
             host=os.environ.get("REDIS_HOST", "red-cug9uopopnds7398r2kg"),
             port=int(os.environ.get("REDIS_PORT", 6379)),
             password=os.environ.get("REDIS_PASSWORD", None),
             decode_responses=True
         )
-    # For local testing/development on Windows/WSL Ubuntu
-    else:
-        return redis.StrictRedis(
-            host="localhost",
-            port=6379,
-            decode_responses=True,
-            db=0
-        )
-    # KEY THIS IN TO WSL/UBUNTU TERMINAL TO START REDIS SERVER
-    # sudo apt install redis-server
-    # sudo service redis-server start
-    # sudo service redis-server status (Check if its running)
-    # sudo service redis-server stop
-    
-    # ALTERNATIVELY USE DOCKER ON JUST A NORMAL WINDOWS TERMINAL
-    # docker run -d -p 6379:6379 --name redis-local redis:7-alpine (first time setup - creates and starts container)
-    # docker start redis-local
-    # docker stop redis-local
-    # docker ps (check if container running)
-
-
-# Explicitly fetch the secret key
-app = FastAPI()
-
-# Generate a random secret key for session encryption
-SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
-
-# Setup Jinja2 Templates (Same as Flask's "templates" folder)
-templates = Jinja2Templates(directory="templates")
+    return get_redis()
 
 # Configure ChromeDriver settings (Manual for the Windows path configurations)
 CHROME_BINARY_PATH = "/usr/bin/google-chrome" if platform.system() == "Linux" else "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
 CHROMEDRIVER_PATH = "/usr/local/bin/chromedriver" if platform.system() == "Linux" else "C:\\Users\\joshua\\Downloads\\chromedriver-win64\\chromedriver.exe"
 
-chrome_options = Options()
-chrome_options.binary_location = CHROME_BINARY_PATH
-chrome_options.add_argument("--headless")  # Headless mode
-chrome_options.add_argument("--disable-gpu")  # Fixes rendering issues
-chrome_options.add_argument("--no-sandbox")  # Required for running as root
-chrome_options.add_argument("--disable-dev-shm-usage")  # Fix shared memory issues
-chrome_options.add_argument("--remote-debugging-port=9222")  # Enables debugging
-chrome_options.add_argument("--disable-software-rasterizer")  # Prevents crashes
-chrome_options.add_argument("--window-size=1920x1080")  # Ensures proper rendering
+def setup_chrome_options():
+    """Configure and return Chrome options."""
+    chrome_options = Options()
+    chrome_options.binary_location = CHROME_BINARY_PATH
+    chrome_options.add_argument("--headless")  # Headless mode
+    chrome_options.add_argument("--disable-gpu")  # Fixes rendering issues
+    chrome_options.add_argument("--no-sandbox")  # Required for running as root
+    chrome_options.add_argument("--disable-dev-shm-usage")  # Fix shared memory issues
+    chrome_options.add_argument("--remote-debugging-port=9222")  # Enables debugging
+    chrome_options.add_argument("--disable-software-rasterizer")  # Prevents crashes
+    chrome_options.add_argument("--window-size=1920x1080")  # Ensures proper rendering
+    return chrome_options
 
-# Persistent ChromeDriver Pool
-MAX_DRIVERS = 1  # Number of preloaded drivers
-driver_pool = []
-pool_lock = threading.Lock()
-
-def create_driver():
-    """
-    Create and return a new Selenium WebDriver instance.
-    """
+def create_driver(chrome_options):
+    """Create and return a new Selenium WebDriver instance."""
     try:
         print("Starting ChromeDriver...")
         service = Service(CHROMEDRIVER_PATH)  # Ensure correct path
@@ -131,49 +88,53 @@ def create_driver():
         print(f"Error creating WebDriver: {str(e)}")
         raise
 
-# Preload ChromeDriver instances
-for _ in range(MAX_DRIVERS):
-    driver_pool.append(create_driver())
+def setup_driver_pool(chrome_options, max_drivers=1):
+    """Set up and return driver pool functions."""
+    driver_pool = []
+    pool_lock = threading.Lock()
 
-def get_driver():
-    with pool_lock:
-        if driver_pool:
-            return driver_pool.pop()
-        else:
-            print("Creating new ChromeDriver instance...")
-            try:
-                driver = create_driver()
-                if driver:
-                    print("ChromeDriver started successfully!")
-                else:
-                    print("Failed to start ChromeDriver.")
-                return driver
-            except Exception as e:
-                print(f"Error starting ChromeDriver: {str(e)}")
-                return None
-        
-# Return driver to the pool
-def release_driver(driver):
-    with pool_lock:
-        driver_pool.append(driver)
+    # Preload ChromeDriver instances
+    for _ in range(max_drivers):
+        driver_pool.append(create_driver(chrome_options))
 
-# Testing redis route (for my own usage)
-@app.get('/test-redis')
-async def test_redis(redis_db=Depends(get_redis)):
-    try:
-        redis_db.set("test_key", "Hello, Redis!")
-        value = redis_db.get("test_key")
-        return {"message": "Redis is working!", "retrieved_value": value}
-    except Exception as e:
-        return {"error": f"Redis connection error: {str(e)}"}
 
-# Pydantic Models for Request Validation
-class SwapRequest(BaseModel):
-    old_index: str
-    new_index: str
-    swap_id: str
+    def get_driver():
+        with pool_lock:
+            if driver_pool:
+                return driver_pool.pop()
+            else:
+                print("Creating new ChromeDriver instance...")
+                try:
+                    driver = create_driver()
+                    if driver:
+                        print("ChromeDriver started successfully!")
+                    else:
+                        print("Failed to start ChromeDriver.")
+                    return driver
+                except Exception as e:
+                    print(f"Error starting ChromeDriver: {str(e)}")
+                    return None
+            
+    # Return driver to the pool
+    def release_driver(driver):
+        with pool_lock:
+            driver_pool.append(driver)
 
-# Utility function to set and get status data from Redis
+    return get_driver, release_driver
+
+# ============================================================================
+# GLOBAL VARIABLES (Will be initialized in main())
+# ============================================================================
+
+app = None
+get_redis = None
+get_driver = None
+release_driver = None
+
+# ============================================================================
+# UTILITY FUNCTIONS FOR REDIS AND STATUS
+# ============================================================================
+
 def set_status_data(redis_db, swap_id, data):
     redis_db.set(swap_id, json.dumps(data))
 
@@ -206,23 +167,43 @@ def update_status(redis_db, swap_id, idx, message, success=False):
             status_data["details"][idx]["swapped"] = True
         redis_db.set(swap_id, json.dumps(status_data))
 
-# Mount the static folder (like Flask's "static" folder)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+def update_overall_status(redis_db, swap_id, status, message):
+    """
+    Updates the overall status and message of the swap operation in Redis.
 
-@app.get('/thumbnail')
-async def serve_thumbnail():
-    # Serve the image from the "static" directory
-    image_path = os.path.join("static", "thumbnail.jpg")
+    Args:
+        redis_db: Redis connection (injected via FastAPI).
+        swap_id (str): Unique swap session ID.
+        status (str): The overall status to set (e.g., "Error", "Completed").
+        message (str): The overall message to set.
+    """
+    status_data = get_status_data(redis_db, swap_id)  # Fetch current status
+    status_data["status"] = status  # Update overall status
+    status_data["message"] = message  # Update overall message
+    set_status_data(redis_db, swap_id, status_data)  # Save changes back to Redis
 
-    # Ensure the file exists
-    if not os.path.exists(image_path):
-        raise HTTPException(status_code=404, detail="Thumbnail not found")
-    
-    return FileResponse(image_path, media_type="image/jpeg")
+# ============================================================================
+# VALIDATION AND HELPER FUNCTIONS
+# ============================================================================
 
 # Login Validation: No session, direct request-based validation
 def validate_login(username: str, password: str):
     return bool(username and password)
+
+def get_base_og_data(title_suffix=""):
+    base_title = "NTU Add-Drop Automator"
+    return {
+        "base_title": base_title,
+        "title": f"{base_title}{' - ' + title_suffix if title_suffix else ''}",
+        "description": "Helping NTU students automate add-drop swapping.",
+        "image": "https://ntu-add-drop-automator.site/static/thumbnail.jpg",
+        "url": "https://ntu-add-drop-automator.site/",
+        "type": "website"
+    }
+
+# ============================================================================
+# SELENIUM AUTOMATION FUNCTIONS
+# ============================================================================
 
 def login_to_portal(driver, username, password, swap_id, redis_db):
     """
@@ -274,216 +255,6 @@ def login_to_portal(driver, username, password, swap_id, redis_db):
         error_message = "Incorrect username/password. Please try again."
         update_overall_status(redis_db, swap_id, status="Error", message=error_message)
         return False
-
-def get_base_og_data(title_suffix=""):
-    base_title = "NTU Add-Drop Automator"
-    return {
-        "base_title": base_title,
-        "title": f"{base_title}{' - ' + title_suffix if title_suffix else ''}",
-        "description": "Helping NTU students automate add-drop swapping.",
-        "image": "https://ntu-add-drop-automator.site/static/thumbnail.jpg",
-        "url": "https://ntu-add-drop-automator.site/",
-        "type": "website"
-    }
-
-@app.get('/privacy-policy', response_class=HTMLResponse)
-async def privacy_policy(request: Request):
-    """
-    Renders the privacy policy page.
-    """
-    # Open Graph metadata
-    og_data = get_base_og_data("Privacy Policy")
-    
-    return templates.TemplateResponse(
-        "privacypolicy.html",
-        {"request": request, "og_data": og_data}
-    )
-
-@app.get('/', response_class=HTMLResponse)
-async def index(request: Request, redis_db=Depends(get_redis)):
-    # Open Graph metadata
-    og_data = get_base_og_data("Home")
-
-    # Check if the current month is January or August
-    now = datetime.now()
-    current_month = now.month
-
-    # If not January (1) or August (8), render the offline page
-    if current_month not in (1, 8):
-        # Determine the next eligible month and year:
-        # If current month is before August, the next eligible month is August of the same year.
-        # Otherwise (if current month is after August), the next eligible month is January of the next year.
-        eligible_month = "August" if current_month < 8 else "January"
-        eligible_year = now.year if current_month < 8 else now.year + 1
-
-        return templates.TemplateResponse(
-            "offline.html", 
-            {"request": request, "eligible_month": eligible_month, "eligible_year": eligible_year, "og_data": og_data}
-        )
-
-    # Otherwise, if it is indeed in January or August, continue running the site as per normal.
-    # Check for logout or timeout messages
-    # logout_message = ""
-    logout_message = redis_db.get("logout_message")
-    if logout_message:
-        redis_db.delete("logout_message") # Remove it after retrieving
-    
-    # Render index page with logout message (if any)
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "message": logout_message, "og_data": og_data}
-    )
-
-@app.post('/input-index', response_class=HTMLResponse)
-async def input_index(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    num_modules: int = Form(...)
-):
-    # Open Graph metadata
-    og_data = get_base_og_data("Input Index")
-
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="Invalid login credentials")
-    
-    if num_modules <= 0:
-        raise HTTPException(status_code=400, detail="Invalid number of modules")
-
-    # Store credentials in session instead of form fields
-    request.session["username"] = username
-    request.session["password"] = password
-    
-    # Render `input_index.html` with number of modules
-    return templates.TemplateResponse(
-        "input_index.html",
-        {
-            "request": request,
-            "num_modules": num_modules,
-            "og_data": og_data
-        }
-    )
-
-@app.get("/swap-status/{swap_id}", response_class=HTMLResponse)
-async def render_swap_status(request: Request, swap_id: str, redis_db=Depends(get_redis)):
-    """
-    Fetches swap status from Redis and renders `swap_status.html`.
-    """
-    # Validate login
-    username = request.session.get("username")
-    password = request.session.get("password")
-    
-    if not validate_login(username, password):
-        # Open Graph metadata
-        og_data = get_base_og_data("Error")
-        return templates.TemplateResponse(
-            "error.html",
-            {
-                "request": request,  # Also add the request object
-                "message": "You are not logged in. Please log in to continue.",
-                "og_data": og_data
-            }
-        )
-
-    # Parse Redis data properly
-    status_data = get_status_data(redis_db, swap_id)
-    
-    # Make sure we have default data if Redis returns nothing
-    if status_data.get("status") == "idle" and not status_data.get("details"):
-        status_data = {
-            "status": "Processing", 
-            "details": [], 
-            "message": "Starting swap process..."
-        }
-
-    # Return the template with parsed data
-    og_data = get_base_og_data("Swap Status")
-    return templates.TemplateResponse(
-        "swap_status.html",
-        {
-            "request": request,
-            "swap_id": swap_id,  # Make sure to include swap_id
-            "status": status_data["status"],
-            "details": status_data["details"],
-            "message": status_data["message"],
-            "og_data": og_data
-        }
-    )
-
-@app.post('/swap-index', response_class=HTMLResponse)
-async def swap_index(
-    request: Request,
-    redis_db=Depends(get_redis)
-):
-    """
-    Handles swap form submission, initiates the swap process, 
-    stores status in Redis, and renders `swap_status.html`.
-    """
-    form_data = await request.form() # Fetch all form data once
-
-    # Get credentials from session instead of form
-    username = request.session.get("username")
-    password = request.session.get("password")
-
-    number_of_modules = int(form_data.get("number_of_modules", 0))
-    
-    try:
-        if number_of_modules <= 0:
-            raise HTTPException(status_code=400, detail="Invalid number of modules")
-        
-        swap_items = []  # List to store (old_index, new_indexes, swapped)
-        for i in range(number_of_modules):
-            old_index = form_data.get(f'old_index_{i}')
-            new_indexes_raw = form_data.get(f'new_index_{i}')
-            
-            if not old_index or not new_indexes_raw:
-                raise HTTPException(status_code=400, detail=f"Missing or invalid data for module {i+1}")
-            
-            new_index_list = [index.strip() for index in new_indexes_raw.split(",") if index.strip()]
-            
-            swap_items.append({
-                "old_index": old_index,
-                "new_indexes": new_index_list,
-                "swapped": False
-            })
-        
-        # Generate a unique ID for this swap session
-        swap_id = f"{username}_{int(time.time())}"
-
-        # Initialize Redis with status data
-        status_data = {
-            "status": "Processing",
-            "details": [
-                {"old_index": item["old_index"], 
-                 "new_indexes": ", ".join(item["new_indexes"]), 
-                 "swapped": False,
-                 "message": "Pending..."}
-                for item in swap_items
-            ],
-            "message": None
-        }
-        redis_db.set(swap_id, json.dumps(status_data))
-        
-        # Start swap processing in a separate thread
-        thread = threading.Thread(target=perform_swaps, args=(username, password, swap_items, swap_id, redis_db), daemon=True)
-        thread.start()
-        
-        # Render `swap_status.html` immediately
-        og_data = get_base_og_data("Swap Status")
-        return templates.TemplateResponse(
-            "swap_status.html",
-            {
-                "request": request,
-                "swap_id": swap_id,
-                "status": status_data["status"],
-                "details": status_data["details"],
-                "message": status_data["message"],
-                "og_data": og_data
-            }
-        )
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Swap initiation failed: {str(e)}")
 
 def perform_swaps(username, password, swap_items, swap_id, redis_db):
     driver = None
@@ -751,87 +522,362 @@ async def attempt_swap(old_index, new_index, idx, driver, swap_id, redis_db):
     finally:
         pass
 
-def update_overall_status(redis_db, swap_id, status, message):
-    """
-    Updates the overall status and message of the swap operation in Redis.
+# ============================================================================
+# PYDANTIC MODELS FOR REQUEST VALIDATION
+# ============================================================================
+class SwapRequest(BaseModel):
+    old_index: str
+    new_index: str
+    swap_id: str
 
-    Args:
-        redis_db: Redis connection (injected via FastAPI).
-        swap_id (str): Unique swap session ID.
-        status (str): The overall status to set (e.g., "Error", "Completed").
-        message (str): The overall message to set.
-    """
-    status_data = get_status_data(redis_db, swap_id)  # Fetch current status
-    status_data["status"] = status  # Update overall status
-    status_data["message"] = message  # Update overall message
-    set_status_data(redis_db, swap_id, status_data)  # Save changes back to Redis
+# ============================================================================
+# APPLICATION SETUP
+# ============================================================================
 
-@app.post('/stop-swap')
-async def stop_swap(request: Request, redis_db=Depends(get_redis)):
-    """
-    Stops the ongoing swap operation.
+def create_app():
+    """Create and configure the FastAPI application."""
+    global get_redis, get_driver, release_driver
 
-    Args:
-        swap_id (str): The unique swap session ID.
+    # Initialize FastAPI app
+    app = FastAPI()
 
-    Returns:
-        JSON response indicating the swap operation has been stopped.
-    """
-    # Get swap_id from query params or form data
-    form_data = await request.form()
-    query_params = request.query_params
-    
-    swap_id = form_data.get("swap_id") or query_params.get("swap_id")
-    if not swap_id:
-        raise HTTPException(status_code=400, detail="Missing swap_id")
+    # Generate a random secret key for session encryption
+    SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+    app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+    # CORS confiuration for React development (TBC)
+    # app.add_middleware(
+    #     CORSMiddleware,
+    #     allow_origins=["http://localhost:3000"], # React dev server
+    #     allow_credentials=True,
+    #     allow_methods=["*"],
+    #     allow_headers=["*"],
+    # )
+
+    # Setup Jinja2 Templates
+    templates = Jinja2Templates(directory="templates")
+
+    # Mount static folder/files
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+    # ========================================================================
+    # ROUTE DEFINITIONS
+    # ========================================================================
+    # Testing redis route (for my own usage)
+    @app.get('/test-redis')
+    async def test_redis(redis_db=Depends(get_redis)):
+        try:
+            redis_db.set("test_key", "Hello, Redis!")
+            value = redis_db.get("test_key")
+            return {"message": "Redis is working!", "retrieved_value": value}
+        except Exception as e:
+            return {"error": f"Redis connection error: {str(e)}"}
+
+    @app.get('/thumbnail')
+    async def serve_thumbnail():
+        # Serve the image from the "static" directory
+        image_path = os.path.join("static", "thumbnail.jpg")
+
+        # Ensure the file exists
+        if not os.path.exists(image_path):
+            raise HTTPException(status_code=404, detail="Thumbnail not found")
         
-    status_data = get_status_data(redis_db, swap_id)
-    status_data["status"] = "Stopped"
-    status_data["message"] = "The swap operation has been stopped by the user."
-    set_status_data(redis_db, swap_id, status_data)
+        return FileResponse(image_path, media_type="image/jpeg")
 
-    # Store logout message in Redis for index page
-    redis_db.set("logout_message", "You have stopped the swap and logged out.")
-
-    # Clear status data from Redis
-    redis_db.delete(swap_id)  # Remove status data associated with the swap_id
-
-    # Clear session data
-    request.session.clear()
-
-    # Redirect user to index page
-    return RedirectResponse(url="/", status_code=303)
-
-@app.post('/log-out')
-async def log_out(request: Request, redis_db=Depends(get_redis)):
-    """
-    Clears Redis status data and logs the user out.
-
-    Args:
-        swap_id (str): The unique swap session ID.
-
-    Returns:
-        JSON response confirming log out.
-    """
-    # Get swap_id from query params or form data
-    form_data = await request.form()
-    query_params = request.query_params
-    
-    swap_id = form_data.get("swap_id") or query_params.get("swap_id")
-    if not swap_id:
-        raise HTTPException(status_code=400, detail="Missing swap_id")
+    @app.get('/privacy-policy', response_class=HTMLResponse)
+    async def privacy_policy(request: Request):
+        """
+        Renders the privacy policy page.
+        """
+        # Open Graph metadata
+        og_data = get_base_og_data("Privacy Policy")
         
-    redis_db.delete(swap_id)  # Remove status data associated with the swap_id
+        return templates.TemplateResponse(
+            "privacypolicy.html",
+            {"request": request, "og_data": og_data}
+        )
 
-    # Clear session data
-    request.session.clear()
+    @app.get('/', response_class=HTMLResponse)
+    async def index(request: Request, redis_db=Depends(get_redis)):
+        # Open Graph metadata
+        og_data = get_base_og_data("Home")
 
-    # Store logout message in Redis
-    redis_db.set("logout_message", "Successfully logged out.")
+        # Check if the current month is January or August
+        now = datetime.now()
+        current_month = now.month
 
-    # Redirect user to index page
-    return RedirectResponse(url="/", status_code=303)
+        # If not January (1) or August (8), render the offline page
+        if current_month not in (1, 8):
+            # Determine the next eligible month and year:
+            # If current month is before August, the next eligible month is August of the same year.
+            # Otherwise (if current month is after August), the next eligible month is January of the next year.
+            eligible_month = "August" if current_month < 8 else "January"
+            eligible_year = now.year if current_month < 8 else now.year + 1
 
+            return templates.TemplateResponse(
+                "offline.html", 
+                {"request": request, "eligible_month": eligible_month, "eligible_year": eligible_year, "og_data": og_data}
+            )
+
+        # Otherwise, if it is indeed in January or August, continue running the site as per normal.
+        # Check for logout or timeout messages
+        logout_message = redis_db.get("logout_message")
+        if logout_message:
+            redis_db.delete("logout_message") # Remove it after retrieving
+        
+        # Render index page with logout message (if any)
+        return templates.TemplateResponse(
+            "index.html",
+            {"request": request, "message": logout_message, "og_data": og_data}
+        )
+
+    @app.post('/input-index', response_class=HTMLResponse)
+    async def input_index(
+        request: Request,
+        username: str = Form(...),
+        password: str = Form(...),
+        num_modules: int = Form(...)
+    ):
+        # Open Graph metadata
+        og_data = get_base_og_data("Input Index")
+
+        if not username or not password:
+            raise HTTPException(status_code=400, detail="Invalid login credentials")
+        
+        if num_modules <= 0:
+            raise HTTPException(status_code=400, detail="Invalid number of modules")
+
+        # Store credentials in session instead of form fields
+        request.session["username"] = username
+        request.session["password"] = password
+        
+        # Render `input_index.html` with number of modules
+        return templates.TemplateResponse(
+            "input_index.html",
+            {
+                "request": request,
+                "num_modules": num_modules,
+                "og_data": og_data
+            }
+        )
+
+    @app.get("/swap-status/{swap_id}", response_class=HTMLResponse)
+    async def render_swap_status(request: Request, swap_id: str, redis_db=Depends(get_redis)):
+        """
+        Fetches swap status from Redis and renders `swap_status.html`.
+        """
+        # Validate login
+        username = request.session.get("username")
+        password = request.session.get("password")
+        
+        if not validate_login(username, password):
+            # Open Graph metadata
+            og_data = get_base_og_data("Error")
+            return templates.TemplateResponse(
+                "error.html",
+                {
+                    "request": request,  # Also add the request object
+                    "message": "You are not logged in. Please log in to continue.",
+                    "og_data": og_data
+                }
+            )
+
+        # Parse Redis data properly
+        status_data = get_status_data(redis_db, swap_id)
+        
+        # Make sure we have default data if Redis returns nothing
+        if status_data.get("status") == "idle" and not status_data.get("details"):
+            status_data = {
+                "status": "Processing", 
+                "details": [], 
+                "message": "Starting swap process..."
+            }
+
+        # Return the template with parsed data
+        og_data = get_base_og_data("Swap Status")
+        return templates.TemplateResponse(
+            "swap_status.html",
+            {
+                "request": request,
+                "swap_id": swap_id,  # Make sure to include swap_id
+                "status": status_data["status"],
+                "details": status_data["details"],
+                "message": status_data["message"],
+                "og_data": og_data
+            }
+        )
+
+    @app.post('/swap-index', response_class=HTMLResponse)
+    async def swap_index(
+        request: Request,
+        redis_db=Depends(get_redis)
+    ):
+        """
+        Handles swap form submission, initiates the swap process, 
+        stores status in Redis, and renders `swap_status.html`.
+        """
+        form_data = await request.form() # Fetch all form data once
+
+        # Get credentials from session instead of form
+        username = request.session.get("username")
+        password = request.session.get("password")
+
+        number_of_modules = int(form_data.get("number_of_modules", 0))
+        
+        try:
+            if number_of_modules <= 0:
+                raise HTTPException(status_code=400, detail="Invalid number of modules")
+            
+            swap_items = []  # List to store (old_index, new_indexes, swapped)
+            for i in range(number_of_modules):
+                old_index = form_data.get(f'old_index_{i}')
+                new_indexes_raw = form_data.get(f'new_index_{i}')
+                
+                if not old_index or not new_indexes_raw:
+                    raise HTTPException(status_code=400, detail=f"Missing or invalid data for module {i+1}")
+                
+                new_index_list = [index.strip() for index in new_indexes_raw.split(",") if index.strip()]
+                
+                swap_items.append({
+                    "old_index": old_index,
+                    "new_indexes": new_index_list,
+                    "swapped": False
+                })
+            
+            # Generate a unique ID for this swap session
+            swap_id = f"{username}_{int(time.time())}"
+
+            # Initialize Redis with status data
+            status_data = {
+                "status": "Processing",
+                "details": [
+                    {"old_index": item["old_index"], 
+                    "new_indexes": ", ".join(item["new_indexes"]), 
+                    "swapped": False,
+                    "message": "Pending..."}
+                    for item in swap_items
+                ],
+                "message": None
+            }
+            redis_db.set(swap_id, json.dumps(status_data))
+            
+            # Start swap processing in a separate thread
+            thread = threading.Thread(target=perform_swaps, args=(username, password, swap_items, swap_id, redis_db), daemon=True)
+            thread.start()
+            
+            # Render `swap_status.html` immediately
+            og_data = get_base_og_data("Swap Status")
+            return templates.TemplateResponse(
+                "swap_status.html",
+                {
+                    "request": request,
+                    "swap_id": swap_id,
+                    "status": status_data["status"],
+                    "details": status_data["details"],
+                    "message": status_data["message"],
+                    "og_data": og_data
+                }
+            )
+        
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Swap initiation failed: {str(e)}")
+
+    @app.post('/stop-swap')
+    async def stop_swap(request: Request, redis_db=Depends(get_redis)):
+        """
+        Stops the ongoing swap operation.
+
+        Args:
+            swap_id (str): The unique swap session ID.
+
+        Returns:
+            JSON response indicating the swap operation has been stopped.
+        """
+        # Get swap_id from query params or form data
+        form_data = await request.form()
+        query_params = request.query_params
+        
+        swap_id = form_data.get("swap_id") or query_params.get("swap_id")
+        if not swap_id:
+            raise HTTPException(status_code=400, detail="Missing swap_id")
+            
+        status_data = get_status_data(redis_db, swap_id)
+        status_data["status"] = "Stopped"
+        status_data["message"] = "The swap operation has been stopped by the user."
+        set_status_data(redis_db, swap_id, status_data)
+
+        # Store logout message in Redis for index page
+        redis_db.set("logout_message", "You have stopped the swap and logged out.")
+
+        # Clear status data from Redis
+        redis_db.delete(swap_id)  # Remove status data associated with the swap_id
+
+        # Clear session data
+        request.session.clear()
+
+        # Redirect user to index page
+        return RedirectResponse(url="/", status_code=303)
+
+    @app.post('/log-out')
+    async def log_out(request: Request, redis_db=Depends(get_redis)):
+        """
+        Clears Redis status data and logs the user out.
+
+        Args:
+            swap_id (str): The unique swap session ID.
+
+        Returns:
+            JSON response confirming log out.
+        """
+        # Get swap_id from query params or form data
+        form_data = await request.form()
+        query_params = request.query_params
+        
+        swap_id = form_data.get("swap_id") or query_params.get("swap_id")
+        if not swap_id:
+            raise HTTPException(status_code=400, detail="Missing swap_id")
+            
+        redis_db.delete(swap_id)  # Remove status data associated with the swap_id
+
+        # Clear session data
+        request.session.clear()
+
+        # Store logout message in Redis
+        redis_db.set("logout_message", "Successfully logged out.")
+
+        # Redirect user to index page
+        return RedirectResponse(url="/", status_code=303)
+
+    return app
+
+# ============================================================================
+# MAIN FUNCTION
+# ============================================================================
+
+def main():
+    """Initialize the application and start the server."""
+    global app, get_redis, get_driver, release_driver
+
+    print("Starting NTU Add-Drop Automator...")
+
+    print("Loading environment variables...")
+    load_dotenv()
+
+    print("Checking Chrome installations...")
+    check_chrome_paths()
+
+    print("Setting up Redis connection...")
+    get_redis = setup_redis_connection()
+
+    print("Setting up Chrome WebDriver pool...")
+    chrome_options = setup_chrome_options()
+    get_driver, release_driver = setup_driver_pool()
+
+    print("Creating FastAPI application")
+    app = create_app()
+
+    print("Starting server on http://0.0.0.0:5000")
+    uvicorn.run(app, host="0.0.0.0", port=5000)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    main()
