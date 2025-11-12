@@ -105,7 +105,7 @@ def setup_driver_pool(chrome_options, max_drivers=1):
             else:
                 print("Creating new ChromeDriver instance...")
                 try:
-                    driver = create_driver()
+                    driver = create_driver(chrome_options)
                     if driver:
                         print("ChromeDriver started successfully!")
                     else:
@@ -126,10 +126,26 @@ def setup_driver_pool(chrome_options, max_drivers=1):
 # GLOBAL VARIABLES (Will be initialized in main())
 # ============================================================================
 
-app = None
 get_redis = None
 get_driver = None
 release_driver = None
+
+def initialize_components():
+    """Initialize all components needed by the app."""
+    global get_redis, get_driver, release_driver
+
+    print("Loading environment variables...")
+    load_dotenv()
+
+    print("Checking Chrome installations...")
+    check_chrome_paths()
+
+    print("Setting up Redis connection...")
+    get_redis = setup_redis_connection()
+
+    print("Setting up Chrome WebDriver pool...")
+    chrome_options = setup_chrome_options()
+    get_driver, release_driver = setup_driver_pool(chrome_options, max_drivers=1)
 
 # ============================================================================
 # UTILITY FUNCTIONS FOR REDIS AND STATUS
@@ -536,7 +552,8 @@ class SwapRequest(BaseModel):
 
 def create_app():
     """Create and configure the FastAPI application."""
-    global get_redis, get_driver, release_driver
+    # Initialize components first
+    initialize_components()
 
     # Initialize FastAPI app
     app = FastAPI()
@@ -563,6 +580,7 @@ def create_app():
     # ========================================================================
     # ROUTE DEFINITIONS
     # ========================================================================
+
     # Testing redis route (for my own usage)
     @app.get('/test-redis')
     async def test_redis(redis_db=Depends(get_redis)):
@@ -854,28 +872,11 @@ def create_app():
 # MAIN FUNCTION
 # ============================================================================
 
+# Initialize app at the module level
+app = create_app()
+
 def main():
-    """Initialize the application and start the server."""
-    global app, get_redis, get_driver, release_driver
-
-    print("Starting NTU Add-Drop Automator...")
-
-    print("Loading environment variables...")
-    load_dotenv()
-
-    print("Checking Chrome installations...")
-    check_chrome_paths()
-
-    print("Setting up Redis connection...")
-    get_redis = setup_redis_connection()
-
-    print("Setting up Chrome WebDriver pool...")
-    chrome_options = setup_chrome_options()
-    get_driver, release_driver = setup_driver_pool()
-
-    print("Creating FastAPI application")
-    app = create_app()
-
+    """Start the server when running directly."""
     print("Starting server on http://0.0.0.0:5000")
     uvicorn.run(app, host="0.0.0.0", port=5000)
 
