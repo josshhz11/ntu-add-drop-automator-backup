@@ -57,7 +57,7 @@ def setup_redis_connection():
             password=os.environ.get("REDIS_PASSWORD", None),
             decode_responses=True
         )
-    return get_redis()
+    return get_redis
 
 # Configure ChromeDriver settings (Manual for the Windows path configurations)
 CHROME_BINARY_PATH = "/usr/bin/google-chrome" if platform.system() == "Linux" else "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
